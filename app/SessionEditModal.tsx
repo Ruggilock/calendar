@@ -22,6 +22,7 @@ interface SessionEditModalProps {
   onClose: () => void;
   onSave: (updates: Partial<Session>) => void;
   onDelete: () => void;
+  onReturnToBank?: () => void;
 }
 
 export default function SessionEditModal({
@@ -32,6 +33,7 @@ export default function SessionEditModal({
   onClose,
   onSave,
   onDelete,
+  onReturnToBank,
 }: SessionEditModalProps) {
   const [formData, setFormData] = useState<Partial<Session>>({});
 
@@ -47,7 +49,6 @@ export default function SessionEditModal({
         location: session.location || "",
         duration: session.duration || "",
         tags: session.tags || [],
-        speaker: session.speaker || undefined,
         sponsorLogo: session.sponsorLogo || "",
       });
     }
@@ -64,22 +65,6 @@ export default function SessionEditModal({
   const handleTagsChange = (value: string) => {
     const tags = value.split(",").map((t) => t.trim()).filter(Boolean);
     setFormData((prev) => ({ ...prev, tags }));
-  };
-
-  const handleSpeakerChange = (field: string, value: string) => {
-    setFormData((prev) => ({
-      ...prev,
-      speaker: {
-        name: prev.speaker?.name || "",
-        role: prev.speaker?.role || "",
-        avatar: prev.speaker?.avatar || "",
-        [field]: value,
-      },
-    }));
-  };
-
-  const clearSpeaker = () => {
-    setFormData((prev) => ({ ...prev, speaker: undefined }));
   };
 
   return (
@@ -222,53 +207,6 @@ export default function SessionEditModal({
               />
             </div>
 
-            {/* Speaker Section */}
-            <div className="border border-slate-600 rounded-lg p-4">
-              <div className="flex justify-between items-center mb-3">
-                <h3 className="text-sm font-medium text-slate-300">Speaker</h3>
-                {formData.speaker && (
-                  <button
-                    type="button"
-                    onClick={clearSpeaker}
-                    className="text-xs text-red-400 hover:text-red-300"
-                  >
-                    Quitar speaker
-                  </button>
-                )}
-              </div>
-
-              <div className="space-y-3">
-                <div>
-                  <label className="block text-xs text-slate-400 mb-1">Nombre</label>
-                  <input
-                    type="text"
-                    value={formData.speaker?.name || ""}
-                    onChange={(e) => handleSpeakerChange("name", e.target.value)}
-                    className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white text-sm focus:outline-none focus:border-emerald-500"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs text-slate-400 mb-1">Rol / Empresa</label>
-                  <input
-                    type="text"
-                    value={formData.speaker?.role || ""}
-                    onChange={(e) => handleSpeakerChange("role", e.target.value)}
-                    className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white text-sm focus:outline-none focus:border-emerald-500"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs text-slate-400 mb-1">Avatar URL</label>
-                  <input
-                    type="url"
-                    value={formData.speaker?.avatar || ""}
-                    onChange={(e) => handleSpeakerChange("avatar", e.target.value)}
-                    placeholder="https://..."
-                    className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white text-sm focus:outline-none focus:border-emerald-500"
-                  />
-                </div>
-              </div>
-            </div>
-
             {/* Sponsor Logo (para Lightning Talks) */}
             {formData.type === "LIGHTNING" && (
               <div className="border border-yellow-600/50 rounded-lg p-4 bg-yellow-900/10">
@@ -333,6 +271,18 @@ export default function SessionEditModal({
                   className="px-4 py-2 bg-red-600 hover:bg-red-500 text-white rounded-lg transition-colors text-sm"
                 >
                   Eliminar
+                </button>
+              )}
+              {!isCreating && session?.talkId && onReturnToBank && (
+                <button
+                  type="button"
+                  onClick={onReturnToBank}
+                  className="px-4 py-2 bg-slate-600 hover:bg-slate-500 text-slate-200 rounded-lg transition-colors text-sm flex items-center gap-1.5"
+                >
+                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 17l-5-5m0 0l5-5m-5 5h12" />
+                  </svg>
+                  Al banco
                 </button>
               )}
               <div className="flex-1" />

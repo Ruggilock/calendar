@@ -1,11 +1,17 @@
 "use client";
 
-import { useState, useRef } from "react";
-import { Session, DaySchedule, Track } from "./types";
+import { useState, useMemo } from "react";
+import { Session, DaySchedule, Track, Talk } from "./types";
 import AiChat from "./AiChat";
 import { useAuth } from "./AuthContext";
 import { useScheduleData } from "./useScheduleData";
+import { useTalksBank } from "./useTalksBank";
 import SessionEditModal from "./SessionEditModal";
+import TalksPanel from "./TalksPanel";
+import TalkEditModal from "./TalkEditModal";
+import { DndContext, DragEndEvent, DragOverlay, DragStartEvent, useDroppable, useDraggable, MouseSensor, TouchSensor, useSensor, useSensors } from "@dnd-kit/core";
+import { CSS } from "@dnd-kit/utilities";
+import { TALKS_PANEL_DROP_ID } from "./TalksPanel";
 
 const TAG_COLORS: Record<string, string> = {
   // Platform & Infrastructure
@@ -205,6 +211,32 @@ function isLightningTalk(session: Session): boolean {
   return session.type === "LIGHTNING" || session.tags?.includes("Lightning") || false;
 }
 
+function DraggableSessionWrapper({ session, children }: { session: Session; children: React.ReactNode }) {
+  const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
+    id: `grid-session-${session.id}`,
+    data: { session },
+  });
+  return (
+    <div
+      ref={setNodeRef}
+      style={{ transform: CSS.Translate.toString(transform), opacity: isDragging ? 0.35 : 1 }}
+      className="h-full relative group"
+    >
+      {/* Handle de drag visible — arrastra al banco */}
+      <div
+        {...listeners}
+        {...attributes}
+        className="absolute top-1.5 right-1.5 z-10 px-1.5 py-0.5 rounded text-[9px] font-medium opacity-30 group-hover:opacity-100 transition-opacity cursor-grab active:cursor-grabbing bg-slate-600 hover:bg-slate-500 text-slate-200 select-none"
+        title="Arrastrar al banco de charlas"
+        onClick={(e) => e.stopPropagation()}
+      >
+        ⠿ banco
+      </div>
+      {children}
+    </div>
+  );
+}
+
 function SessionCard({ session, onClick }: { session: Session; onClick?: () => void }) {
   const tag = session.tags?.[0];
   const tagColor = tag ? TAG_COLORS[tag] || "text-gray-400" : "text-gray-400";
@@ -290,15 +322,15 @@ function FullWidthSession({ session, onClick }: { session: Session; onClick?: ()
         }`}
     >
       <div className="flex-grow">
-        {session.description && (
-          <div className="flex items-center gap-2">
-            <div className="flex-shrink-0">{getIcon()}</div>
-            <div className="flex-grow">
-              <h3 className="text-white font-semibold text-lg">{session.title}</h3>
+        <div className="flex items-center gap-2">
+          <div className="flex-shrink-0">{getIcon()}</div>
+          <div className="flex-grow">
+            <h3 className="text-white font-semibold text-lg">{session.title}</h3>
+            {session.description && (
               <p className="text-slate-400 text-sm">{session.description}</p>
-            </div>
+            )}
           </div>
-        )}
+        </div>
         {session.speaker && (
           <div className="flex -space-x-2">
             {session.speaker && (
@@ -381,16 +413,134 @@ function DayTab({
   );
 }
 
+function DroppableCell({
+  id,
+  children,
+}: {
+  id: string;
+  children: React.ReactNode;
+}) {
+  const { isOver, setNodeRef } = useDroppable({ id });
+  return (
+    <div
+      ref={setNodeRef}
+      className={`h-full transition-colors rounded-lg ${isOver ? "ring-2 ring-emerald-400 ring-offset-1 ring-offset-slate-900" : ""}`}
+    >
+      {children}
+    </div>
+  );
+}
+
 export default function Schedule() {
-  const { schedules, tracks, isLoading, uploadData, downloadData, resetToDefault, updateSession, deleteSession, addSession } = useScheduleData();
+  const { schedules, tracks, isLoading, updateSession, deleteSession, addSession } = useScheduleData();
+  const { talks, addTalk, updateTalk, deleteTalk } = useTalksBank();
   const [activeDay, setActiveDay] = useState<number | null>(null);
-  const [uploadError, setUploadError] = useState<string | null>(null);
-  const [uploadSuccess, setUploadSuccess] = useState(false);
   const [selectedSession, setSelectedSession] = useState<Session | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [activeDragTalk, setActiveDragTalk] = useState<Talk | null>(null);
+  const [talkToEdit, setTalkToEdit] = useState<Talk | null>(null);
   const { logout } = useAuth();
+
+  const effectiveActiveDay = activeDay ?? schedules[0]?.id ?? 1;
+  const currentDay = schedules.find((d) => d.id === effectiveActiveDay) || schedules[0];
+
+  // Set de talkIds que ya están programados en el día activo
+  const scheduledTalkIds = useMemo(() => {
+    const day = schedules.find((d) => d.id === effectiveActiveDay);
+    const ids = new Set<string>();
+    day?.sessions.forEach((s) => { if (s.talkId) ids.add(s.talkId); });
+    return ids;
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [schedules, activeDay]);
+
+  const [activeDragSession, setActiveDragSession] = useState<Session | null>(null);
+
+  const sensors = useSensors(
+    useSensor(MouseSensor, { activationConstraint: { distance: 5 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 200, tolerance: 5 } })
+  );
+
+  const handleDragStart = (event: DragStartEvent) => {
+    const talk = event.active.data.current?.talk as Talk | undefined;
+    const session = event.active.data.current?.session as Session | undefined;
+    if (talk) setActiveDragTalk(talk);
+    if (session) setActiveDragSession(session);
+  };
+
+  const handleDragEnd = (event: DragEndEvent) => {
+    setActiveDragTalk(null);
+    setActiveDragSession(null);
+    const { active, over } = event;
+    if (!over) return;
+
+    const overId = over.id as string;
+
+    // Drag de sesión del grid → panel (devolver al banco)
+    const session = active.data.current?.session as Session | undefined;
+    if (session && overId === TALKS_PANEL_DROP_ID) {
+      // Siempre recrear el talk en el banco al devolver la sesión
+      addTalk({
+        title: session.title,
+        type: session.type,
+        speaker: session.speaker,
+        tags: session.tags,
+        sponsorLogo: session.sponsorLogo,
+        description: session.description,
+      });
+      deleteSession(effectiveActiveDay, session.id);
+      return;
+    }
+
+    const talk = active.data.current?.talk as Talk | undefined;
+    if (!talk) return;
+
+    // droppable id format: "cell-{time}-{trackId}"
+    if (!overId.startsWith("cell-")) return;
+
+    const [, time, trackIdStr] = overId.split("-");
+    const trackId = trackIdStr === "all" ? "all" : parseInt(trackIdStr);
+    const startTime = time;
+    const endTime = talk.type === "LIGHTNING" ? addMinutes(startTime, 5) : addMinutes(startTime, 30);
+
+    const currentDay = schedules.find((d) => d.id === effectiveActiveDay);
+    if (!currentDay) return;
+
+    // Buscar si ya hay una sesión en ese slot/track para reemplazarla
+    const existingSession = currentDay.sessions.find(
+      (s) => s.startTime === startTime && s.trackId === trackId
+    );
+
+    if (existingSession) {
+      updateSession(effectiveActiveDay, existingSession.id, {
+        title: talk.title,
+        type: talk.type,
+        speaker: talk.speaker,
+        tags: talk.tags,
+        sponsorLogo: talk.sponsorLogo,
+        description: talk.description,
+        talkId: talk.id,
+        endTime,
+      });
+    } else {
+      addSession(effectiveActiveDay, {
+        id: `session-${Date.now()}`,
+        title: talk.title,
+        type: talk.type,
+        trackId,
+        startTime,
+        endTime,
+        speaker: talk.speaker,
+        tags: talk.tags,
+        sponsorLogo: talk.sponsorLogo,
+        description: talk.description,
+        talkId: talk.id,
+      });
+    }
+
+    // Borrar el talk del banco al colocarlo en el calendario
+    deleteTalk(talk.id);
+  };
 
   const handleSessionClick = (session: Session) => {
     setSelectedSession(session);
@@ -440,37 +590,6 @@ export default function Schedule() {
     return `${newH.toString().padStart(2, "0")}:${newM.toString().padStart(2, "0")}`;
   }
 
-  // Set initial active day when schedules load
-  const effectiveActiveDay = activeDay ?? schedules[0]?.id ?? 1;
-
-  const currentDay = schedules.find((d) => d.id === effectiveActiveDay) || schedules[0];
-
-  const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
-
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      const content = e.target?.result as string;
-      const result = uploadData(content);
-
-      if (result.success) {
-        setUploadSuccess(true);
-        setUploadError(null);
-        setTimeout(() => setUploadSuccess(false), 3000);
-      } else {
-        setUploadError(result.error || "Error desconocido");
-        setTimeout(() => setUploadError(null), 5000);
-      }
-    };
-    reader.readAsText(file);
-
-    // Reset input so same file can be uploaded again
-    if (fileInputRef.current) {
-      fileInputRef.current.value = "";
-    }
-  };
-
   if (isLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-slate-900">
@@ -491,8 +610,9 @@ export default function Schedule() {
   const dayTimeSlots = [...new Set(currentDay.sessions.map((s) => s.startTime))].sort();
 
   return (
+    <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
     <div className="min-h-screen bg-slate-900 text-white p-8">
-      <div className="max-w-7xl mx-auto">
+      <div className="max-w-[1600px] mx-auto">
         {/* Header */}
         <div className="flex justify-between items-center mb-4">
           <div className="w-24" />
@@ -507,39 +627,8 @@ export default function Schedule() {
           </button>
         </div>
 
-        {/* Upload/Download Controls */}
+        {/* Controls */}
         <div className="flex justify-center gap-4 mb-6">
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept=".json"
-            onChange={handleFileUpload}
-            className="hidden"
-          />
-          <button
-            onClick={() => fileInputRef.current?.click()}
-            className="px-4 py-2 text-sm bg-slate-700 hover:bg-slate-600 text-white rounded-lg transition-colors flex items-center gap-2"
-          >
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
-            </svg>
-            Subir JSON
-          </button>
-          <button
-            onClick={downloadData}
-            className="px-4 py-2 text-sm bg-slate-700 hover:bg-slate-600 text-white rounded-lg transition-colors flex items-center gap-2"
-          >
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-            </svg>
-            Descargar JSON
-          </button>
-          <button
-            onClick={resetToDefault}
-            className="px-4 py-2 text-sm bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white rounded-lg transition-colors"
-          >
-            Resetear
-          </button>
           <button
             onClick={() => handleCreateSession()}
             className="px-4 py-2 text-sm bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg transition-colors flex items-center gap-2"
@@ -550,18 +639,6 @@ export default function Schedule() {
             Nueva Sesión
           </button>
         </div>
-
-        {/* Upload feedback */}
-        {uploadError && (
-          <div className="mb-4 p-3 bg-red-900/50 border border-red-500 rounded-lg text-red-200 text-sm text-center">
-            {uploadError}
-          </div>
-        )}
-        {uploadSuccess && (
-          <div className="mb-4 p-3 bg-green-900/50 border border-green-500 rounded-lg text-green-200 text-sm text-center">
-            Schedule cargado correctamente
-          </div>
-        )}
 
         {/* Day Tabs */}
         <div className="flex justify-center gap-8 mb-8 border-b border-slate-700">
@@ -575,75 +652,81 @@ export default function Schedule() {
           ))}
         </div>
 
-        {/* Schedule Grid */}
-        <div className="bg-slate-800/30 rounded-2xl p-6 border border-slate-700/50">
-          {/* Track Headers */}
-          <div className="grid grid-cols-[80px_repeat(5,1fr)] gap-4 mb-6">
-            <div /> {/* Empty cell for time column */}
-            {tracks.map((track, index) => (
-              <TrackHeader key={track.id} track={track} index={index} />
-            ))}
-          </div>
+        {/* Main layout: Panel + Grid */}
+        <div className="flex gap-6 items-start">
+          {/* Talks Panel */}
+          <TalksPanel
+            talks={talks}
+            scheduledTalkIds={scheduledTalkIds}
+            onAddTalk={addTalk}
+            onEditTalk={(t) => setTalkToEdit(t)}
+            onDeleteTalk={deleteTalk}
+          />
 
-          {/* Time Slots */}
-          <div className="space-y-2">
-            {dayTimeSlots.map((time) => {
-              const sessions = getSessionsForTimeSlot(time);
-              if (sessions.length === 0) return null;
+          {/* Schedule Grid */}
+          <div className="flex-1 min-w-0 bg-slate-800/30 rounded-2xl p-6 border border-slate-700/50">
+            {/* Track Headers */}
+            <div className="grid grid-cols-[80px_repeat(5,1fr)] gap-4 mb-6">
+              <div />
+              {tracks.map((track, index) => (
+                <TrackHeader key={track.id} track={track} index={index} />
+              ))}
+            </div>
 
-              const fullWidthSessions = sessions.filter(isFullWidthSession);
-              const trackSessions = sessions.filter((s) => !isFullWidthSession(s));
+            {/* Time Slots */}
+            <div className="space-y-2">
+              {dayTimeSlots.map((time) => {
+                const sessions = getSessionsForTimeSlot(time);
+                if (sessions.length === 0) return null;
 
-              // Check if this is a lightning talk slot
-              const isLightningSlot = trackSessions.some(s => isLightningTalk(s));
+                const fullWidthSessions = sessions.filter(isFullWidthSession);
+                const trackSessions = sessions.filter((s) => !isFullWidthSession(s));
+                const isLightningSlot = trackSessions.some(s => isLightningTalk(s));
 
-              return (
-                <div key={time} className="mb-2">
-                  {/* Full-width sessions */}
-                  {fullWidthSessions.map((session) => (
-                    <div
-                      key={session.id}
-                      className="grid grid-cols-[80px_1fr] gap-4 mb-3"
-                    >
-                      <div className="text-slate-400 text-sm font-medium pt-4">
-                        {time}
+                return (
+                  <div key={time} className="mb-2">
+                    {fullWidthSessions.map((session) => (
+                      <div key={session.id} className="grid grid-cols-[80px_1fr] gap-4 mb-3">
+                        <div className="text-slate-400 text-sm font-medium pt-4">{time}</div>
+                        <DroppableCell id={`cell-${time}-all`}>
+                          <FullWidthSession session={session} onClick={() => handleSessionClick(session)} />
+                        </DroppableCell>
                       </div>
-                      <FullWidthSession session={session} onClick={() => handleSessionClick(session)} />
-                    </div>
-                  ))}
+                    ))}
 
-                  {/* Track sessions */}
-                  {trackSessions.length > 0 && (
-                    <div className="grid grid-cols-[80px_repeat(5,1fr)] items-stretch gap-3">
-                      <div className={`text-slate-400 text-sm font-medium ${isLightningSlot ? "pt-2" : "pt-3"}`}>
-                        {fullWidthSessions.length === 0 ? time : ""}
+                    {trackSessions.length > 0 && (
+                      <div className="grid grid-cols-[80px_repeat(5,1fr)] items-stretch gap-3">
+                        <div className={`text-slate-400 text-sm font-medium ${isLightningSlot ? "pt-2" : "pt-3"}`}>
+                          {fullWidthSessions.length === 0 ? time : ""}
+                        </div>
+                        {tracks.map((track) => {
+                          const session = trackSessions.find((s) => s.trackId === track.id);
+                          const cellId = `cell-${time}-${track.id}`;
+                          return (
+                            <DroppableCell key={track.id} id={cellId}>
+                              {session ? (
+                                <DraggableSessionWrapper session={session}>
+                                  <SessionCard session={session} onClick={() => handleSessionClick(session)} />
+                                </DraggableSessionWrapper>
+                              ) : (
+                                <button
+                                  onClick={() => handleCreateSession(time, track.id)}
+                                  className="w-full h-full min-h-[60px] rounded-lg border-2 border-dashed border-slate-700 hover:border-emerald-500/50 flex items-center justify-center text-slate-600 hover:text-emerald-400 transition-colors"
+                                >
+                                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                                  </svg>
+                                </button>
+                              )}
+                            </DroppableCell>
+                          );
+                        })}
                       </div>
-                      {tracks.map((track) => {
-                        const session = trackSessions.find(
-                          (s) => s.trackId === track.id
-                        );
-                        return (
-                          <div key={track.id} className="h-full">
-                            {session ? (
-                              <SessionCard session={session} onClick={() => handleSessionClick(session)} />
-                            ) : (
-                              <button
-                                onClick={() => handleCreateSession(time, track.id)}
-                                className="w-full h-full min-h-[60px] rounded-lg border-2 border-dashed border-slate-700 hover:border-emerald-500/50 flex items-center justify-center text-slate-600 hover:text-emerald-400 transition-colors"
-                              >
-                                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                                </svg>
-                              </button>
-                            )}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
-              );
-            })}
+                    )}
+                  </div>
+                );
+              })}
+            </div>
           </div>
         </div>
       </div>
@@ -664,7 +747,43 @@ export default function Schedule() {
         }}
         onSave={handleSessionSave}
         onDelete={handleSessionDelete}
+        onReturnToBank={selectedSession?.talkId ? () => {
+          deleteSession(effectiveActiveDay, selectedSession!.id);
+          setIsModalOpen(false);
+          setSelectedSession(null);
+        } : undefined}
       />
+
+      {/* Talk Edit Modal */}
+      <TalkEditModal
+        talk={talkToEdit}
+        isOpen={!!talkToEdit}
+        onClose={() => setTalkToEdit(null)}
+        onSave={(updates) => {
+          if (talkToEdit) updateTalk(talkToEdit.id, updates);
+          setTalkToEdit(null);
+        }}
+      />
+
+      {/* Drag Overlay */}
+      <DragOverlay>
+        {(activeDragTalk || activeDragSession) && (
+          <div className="bg-slate-700 border border-emerald-500 rounded-lg p-3 shadow-2xl w-56 opacity-95 cursor-grabbing">
+            <span className="text-[10px] text-yellow-400 uppercase font-semibold">
+              {activeDragTalk?.type ?? activeDragSession?.type}
+            </span>
+            <p className="text-white text-xs font-medium mt-1">
+              {activeDragTalk?.title ?? activeDragSession?.title}
+            </p>
+            {(activeDragTalk?.speaker ?? activeDragSession?.speaker) && (
+              <p className="text-slate-400 text-[11px] mt-1">
+                {activeDragTalk?.speaker?.name ?? activeDragSession?.speaker?.name}
+              </p>
+            )}
+          </div>
+        )}
+      </DragOverlay>
     </div>
+    </DndContext>
   );
 }
