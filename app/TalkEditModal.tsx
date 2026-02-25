@@ -1,7 +1,8 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Talk, SessionType } from "./types";
+import { Talk, SessionType, Track } from "./types";
+import { TOPICS } from "./schedule-data";
 
 const SESSION_TYPES: { value: SessionType; label: string }[] = [
   { value: "KEYNOTE", label: "Keynote" },
@@ -17,11 +18,12 @@ const SESSION_TYPES: { value: SessionType; label: string }[] = [
 interface TalkEditModalProps {
   talk: Talk | null;
   isOpen: boolean;
+  tracks: Track[];
   onClose: () => void;
   onSave: (updates: Partial<Talk>) => void;
 }
 
-export default function TalkEditModal({ talk, isOpen, onClose, onSave }: TalkEditModalProps) {
+export default function TalkEditModal({ talk, isOpen, tracks, onClose, onSave }: TalkEditModalProps) {
   const [formData, setFormData] = useState<Partial<Talk>>({});
 
   useEffect(() => {
@@ -33,6 +35,8 @@ export default function TalkEditModal({ talk, isOpen, onClose, onSave }: TalkEdi
         tags: talk.tags || [],
         speaker: talk.speaker || undefined,
         sponsorLogo: talk.sponsorLogo || "",
+        trackId: talk.trackId || undefined,
+        topicId: talk.topicId || undefined,
       });
     }
   }, [talk]);
@@ -59,6 +63,8 @@ export default function TalkEditModal({ talk, isOpen, onClose, onSave }: TalkEdi
       },
     }));
   };
+
+  const hasContent = !["NETWORKING", "BREAK", "LUNCH"].includes(formData.type || "");
 
   return (
     <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
@@ -111,7 +117,7 @@ export default function TalkEditModal({ talk, isOpen, onClose, onSave }: TalkEdi
             </div>
 
             {/* Tags */}
-            {!["NETWORKING", "BREAK", "LUNCH"].includes(formData.type || "") && (
+            {hasContent && (
               <div>
                 <label className="block text-sm font-medium text-slate-300 mb-1">Tags (separados por coma)</label>
                 <input
@@ -124,8 +130,28 @@ export default function TalkEditModal({ talk, isOpen, onClose, onSave }: TalkEdi
               </div>
             )}
 
+            {/* Topic */}
+            {hasContent && (
+              <div>
+                <label className="block text-sm font-medium text-slate-300 mb-1">Topic</label>
+                <select
+                  value={formData.topicId?.toString() || ""}
+                  onChange={(e) => setFormData((prev) => ({
+                    ...prev,
+                    topicId: e.target.value ? parseInt(e.target.value) : undefined,
+                  }))}
+                  className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white focus:outline-none focus:border-emerald-500"
+                >
+                  <option value="">Sin topic</option>
+                  {TOPICS.map((topic) => (
+                    <option key={topic.id} value={topic.id}>{topic.name}</option>
+                  ))}
+                </select>
+              </div>
+            )}
+
             {/* Speaker */}
-            {!["NETWORKING", "BREAK", "LUNCH"].includes(formData.type || "") && (
+            {hasContent && (
             <div className="border border-slate-600 rounded-lg p-4">
               <div className="flex justify-between items-center mb-3">
                 <h3 className="text-sm font-medium text-slate-300">Speaker</h3>
@@ -171,6 +197,16 @@ export default function TalkEditModal({ talk, isOpen, onClose, onSave }: TalkEdi
                 </div>
               </div>
             </div>
+            )}
+
+            {/* Track: solo lectura, se asigna automáticamente al arrastrar */}
+            {hasContent && formData.trackId && (
+              <div className="flex items-center gap-2 px-3 py-2 bg-slate-700/50 border border-slate-600/50 rounded-lg">
+                <span className="text-xs text-slate-400">Track asignado:</span>
+                <span className="text-xs text-emerald-400 font-medium">
+                  {tracks.find(t => t.id === formData.trackId)?.name}
+                </span>
+              </div>
             )}
 
             {/* Sponsor Logo (solo para Lightning) */}

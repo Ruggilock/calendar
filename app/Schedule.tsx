@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useCallback } from "react";
 import { Session, DaySchedule, Track, Talk } from "./types";
 import AiChat from "./AiChat";
 import { useAuth } from "./AuthContext";
@@ -456,6 +456,16 @@ export default function Schedule() {
 
   const [activeDragSession, setActiveDragSession] = useState<Session | null>(null);
 
+  const handleDeleteTalk = useCallback((id: string) => {
+    deleteTalk(id);
+    // También borrar cualquier sesión vinculada a este talk en todos los días
+    schedules.forEach((day) => {
+      day.sessions.forEach((s) => {
+        if (s.talkId === id) deleteSession(day.id, s.id);
+      });
+    });
+  }, [deleteTalk, deleteSession, schedules]);
+
   const sensors = useSensors(
     useSensor(MouseSensor, { activationConstraint: { distance: 5 } }),
     useSensor(TouchSensor, { activationConstraint: { delay: 200, tolerance: 5 } })
@@ -479,15 +489,7 @@ export default function Schedule() {
     // Drag de sesión del grid → panel (devolver al banco)
     const session = active.data.current?.session as Session | undefined;
     if (session && overId === TALKS_PANEL_DROP_ID) {
-      // Siempre recrear el talk en el banco al devolver la sesión
-      addTalk({
-        title: session.title,
-        type: session.type,
-        speaker: session.speaker,
-        tags: session.tags,
-        sponsorLogo: session.sponsorLogo,
-        description: session.description,
-      });
+      // Solo borrar la sesión — el talk ya está en el banco (nunca se borró)
       deleteSession(effectiveActiveDay, session.id);
       return;
     }
@@ -538,8 +540,10 @@ export default function Schedule() {
       });
     }
 
-    // Borrar el talk del banco al colocarlo en el calendario
-    deleteTalk(talk.id);
+    // Auto-asignar el track del slot al talk (el talk permanece en el banco como "ya programado")
+    if (typeof trackId === "number") {
+      updateTalk(talk.id, { trackId });
+    }
   };
 
   const handleSessionClick = (session: Session) => {
@@ -657,10 +661,11 @@ export default function Schedule() {
           {/* Talks Panel */}
           <TalksPanel
             talks={talks}
+            tracks={tracks}
             scheduledTalkIds={scheduledTalkIds}
             onAddTalk={addTalk}
             onEditTalk={(t) => setTalkToEdit(t)}
-            onDeleteTalk={deleteTalk}
+            onDeleteTalk={handleDeleteTalk}
           />
 
           {/* Schedule Grid */}
@@ -758,6 +763,7 @@ export default function Schedule() {
       <TalkEditModal
         talk={talkToEdit}
         isOpen={!!talkToEdit}
+        tracks={tracks}
         onClose={() => setTalkToEdit(null)}
         onSave={(updates) => {
           if (talkToEdit) updateTalk(talkToEdit.id, updates);

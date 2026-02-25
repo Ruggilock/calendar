@@ -13,6 +13,8 @@ function mapTalkRow(row: Record<string, unknown>): Talk {
     description: (row.description as string) || undefined,
     tags: (row.tags as string[]) || [],
     sponsorLogo: (row.sponsor_logo as string) || undefined,
+    trackId: (row.track_id as number) || undefined,
+    topicId: (row.topic_id as number) || undefined,
   };
 }
 

@@ -8,6 +8,13 @@ export const TRACKS: Track[] = [
   { id: 5, name: "Talleres" },
 ];
 
+export const TOPICS: { id: number; name: string }[] = [
+  { id: 1, name: "Enterprise AI & Data Strategy" },
+  { id: 2, name: "Modern Leadership & Culture" },
+  { id: 3, name: "Platform Engineering & DevOps" },
+  { id: 4, name: "Security & Technology Transformation" },
+];
+
 export const DAY_SCHEDULES: DaySchedule[] = [
   {
     id: 1,

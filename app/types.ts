@@ -37,6 +37,8 @@ export interface Talk {
   description?: string;
   tags?: string[];
   sponsorLogo?: string;
+  trackId?: number;
+  topicId?: number;
 }
 
 export interface DaySchedule {

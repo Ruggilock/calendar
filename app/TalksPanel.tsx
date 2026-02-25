@@ -3,7 +3,8 @@
 import { useState } from "react";
 import { useDraggable, useDroppable } from "@dnd-kit/core";
 import { CSS } from "@dnd-kit/utilities";
-import { Talk, SessionType } from "./types";
+import { Talk, SessionType, Track } from "./types";
+import { TOPICS } from "./schedule-data";
 
 export const TALKS_PANEL_DROP_ID = "talks-bank-panel";
 
@@ -32,11 +33,15 @@ const TYPE_LABELS: Record<SessionType, string> = {
 function DraggableTalkCard({
   talk,
   isScheduled,
+  trackName,
+  topicName,
   onEdit,
   onDelete,
 }: {
   talk: Talk;
   isScheduled: boolean;
+  trackName?: string;
+  topicName?: string;
   onEdit: () => void;
   onDelete: () => void;
 }) {
@@ -104,6 +109,20 @@ function DraggableTalkCard({
             <span className="text-[11px] text-white/70 leading-tight">{talk.speaker.name}</span>
           </div>
         )}
+
+        {/* Topic */}
+        {topicName && (
+          <span className="text-[9px] bg-indigo-900/50 text-indigo-300 border border-indigo-700/40 rounded px-1.5 py-0.5 self-start mt-0.5 leading-tight">
+            {topicName}
+          </span>
+        )}
+
+        {/* Track asignado */}
+        {trackName && (
+          <span className="text-[9px] bg-slate-700/60 text-slate-300 rounded px-1.5 py-0.5 self-start mt-0.5">
+            {trackName}
+          </span>
+        )}
       </div>
 
       {/* Action buttons - outside drag area */}
@@ -127,6 +146,7 @@ function DraggableTalkCard({
 
 interface TalksPanelProps {
   talks: Talk[];
+  tracks: Track[];
   scheduledTalkIds: Set<string>;
   onAddTalk: (talk: Omit<Talk, "id">) => void;
   onEditTalk: (talk: Talk) => void;
@@ -135,6 +155,7 @@ interface TalksPanelProps {
 
 export default function TalksPanel({
   talks,
+  tracks,
   scheduledTalkIds,
   onAddTalk,
   onEditTalk,
@@ -209,6 +230,8 @@ export default function TalksPanel({
                 key={talk.id}
                 talk={talk}
                 isScheduled={false}
+                trackName={talk.trackId ? tracks.find(t => t.id === talk.trackId)?.name : undefined}
+                topicName={talk.topicId ? TOPICS.find(tp => tp.id === talk.topicId)?.name : undefined}
                 onEdit={() => onEditTalk(talk)}
                 onDelete={() => onDeleteTalk(talk.id)}
               />
@@ -227,6 +250,7 @@ export default function TalksPanel({
                 key={talk.id}
                 talk={talk}
                 isScheduled={true}
+                topicName={talk.topicId ? TOPICS.find(tp => tp.id === talk.topicId)?.name : undefined}
                 onEdit={() => onEditTalk(talk)}
                 onDelete={() => onDeleteTalk(talk.id)}
               />
